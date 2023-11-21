@@ -10,7 +10,6 @@ This PowerShell script retrieves SSL certificate details for websites and provid
 - **Retrieve Details:** Gather SSL certificate information for websites.
 - **Sort Options:** Sort retrieved data based on Site Name, Binding Information, Binding Name, Certificate Store, Certificate Name, and Expiration Date.
 - **Filtering:** Filter results based on user-provided domains for specific searches.
-- **Error Handling:** Gracefully handles errors during the information retrieval process.
 
 ## Requirements
 
@@ -25,4 +24,4 @@ This PowerShell script retrieves SSL certificate details for websites and provid
 2. Select an option:
     - `[1] Entire list`: Retrieve the complete SSL certificate information.
     - `[2] Search by Domain`: Enter a domain to filter results.
-3. Choose a sorting option based on the provided criteria.
+3. Choose a sorting option based on your criteria.
