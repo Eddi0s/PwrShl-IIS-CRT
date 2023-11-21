@@ -1,0 +1,144 @@
+Write-Host "Kies een optie:"
+Write-Host "[1] Gehele lijst"
+Write-Host "[2] Zoeken op Domain"
+
+$keuzeVoorLijst = Read-Host "Kies een optie"
+
+$results = @()
+
+if ($keuzeVoorLijst -eq 2) {
+    $domainToSearch = Read-Host "Voer het domein in om op te zoeken"
+}
+
+Write-Host "Kies een sorteeroptie:"
+Write-Host "[1] Gesorteerd op SiteName"
+Write-Host "[2] Gesorteerd op Binding-Information"
+Write-Host "[3] Gesorteerd op Binding-Name (Gesorteerd op letter na 1-na-laatste punt)"
+Write-Host "[4] Gesorteerd op CertificateStore"
+Write-Host "[5] Gesorteerd op CertificateName (Gesorteerd op letter na 1-na-laatste punt)"
+Write-Host "[6] Gesorteerd op ExpirationDate"
+
+$sorteerKeuze = Read-Host "Voer het nummer van de gewenste sorteeroptie in"
+
+function Get-TextAfterSecondLastDot($text) {
+    $splitText = $text -split '\.'
+    if ($splitText.Count -gt 2) {
+        return $splitText[-2..-1] -join '.'
+    }
+    return $text
+}
+
+function Get-TextAfterSecondLastDotForCertificate($text) {
+    $splitText = $text -split '\.'
+    if ($splitText.Count -gt 2) {
+        return $splitText[-2..-1] -join '.'
+    }
+    return $text
+}
+
+$sites = Get-Website
+
+foreach ($site in $sites) {
+    $bindings = $site.bindings.collection | Where-Object { $_.protocol -eq "https" }
+
+    foreach ($binding in $bindings) {
+        try {
+            $bindingInfo = $binding.BindingInformation
+            $bindingInfoParts = $bindingInfo -split ":"
+            $bindingInformation = $bindingInfoParts[0] + ":" + $bindingInfoParts[1]
+
+            $bindingName = $bindingInfoParts[2] -replace '^.*:', ''
+
+            $certPath = "Cert:\LocalMachine\$($binding.CertificateStoreName)\$($binding.CertificateHash)"
+            
+            if (Test-Path $certPath) {
+                $cert = Get-Item -Path $certPath
+                
+                $result = [PSCustomObject]@{
+                    'SiteName'            = $site.Name
+                    'Binding-Information' = $bindingInfoParts[0] + ":" + $bindingInfoParts[1]
+                    'Binding-Name'        = $bindingName
+                    'CertificateStore'    = $binding.CertificateStoreName
+                    'CertificateName'     = ($cert.Subject -split ',')[0] -replace 'CN=', ''
+                    'ExpirationDate'      = $cert.NotAfter.ToString("dd/MM/yyyy")
+                }
+                $results += $result
+            } else {
+                $result = [PSCustomObject]@{
+                    'SiteName'            = $site.Name
+                    'Binding-Information' = $bindingInfoParts[0] + ":" + $bindingInfoParts[1]
+                    'Binding-Name'        = $bindingName
+                    'CertificateStore'    = $binding.CertificateStoreName
+                    'CertificateName'     = 'No Certificate'
+                    'ExpirationDate'      = 'NA'
+                }
+                $results += $result
+            }
+        }
+        catch {
+            $result = [PSCustomObject]@{
+                'SiteName'            = $site.Name
+                'Binding-Information' = $bindingInfoParts[0] + ":" + $bindingInfoParts[1]
+                'Binding-Name'        = 'Fout bij ophalen binding'
+                'CertificateStore'    = $binding.CertificateStoreName
+                'CertificateName'     = 'No Certificate'
+                'ExpirationDate'      = 'NA'
+            }
+            $results += $result
+        }
+    }
+}
+
+if ($keuzeVoorLijst -eq 2) {
+    $results = $results | Where-Object { 
+        $_.SiteName -like "*$domainToSearch*" -or 
+        $_.'Binding-Name' -like "*$domainToSearch*" -or 
+        $_.'CertificateName' -like "*$domainToSearch*"
+    }
+}
+
+switch ($sorteerKeuze) {
+    1 {
+        $results | Sort-Object SiteName | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize
+        break
+    }
+
+    2 {
+        $results | Sort-Object Binding-Information | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize
+        break
+    }
+    3 {
+        $results | Sort-Object { Get-TextAfterSecondLastDot $_.'Binding-Name' } | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize
+        break
+    }
+    4 {
+        $results | Sort-Object CertificateStore | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize
+        break
+    }
+    5 {
+        $results | Sort-Object { Get-TextAfterSecondLastDotForCertificate $_.'CertificateName' } | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize
+        break
+    }
+    6 {
+        $resultsWithValidDates = $results | Where-Object { $_.ExpirationDate -match '\d{2}[-/]\d{2}[-/]\d{4}' }
+        $resultsWithInvalidDates = $results | Where-Object { $_.ExpirationDate -notmatch '\d{2}[-/]\d{2}[-/]\d{4}' }
+
+        $sortedResultsWithValidDates = $resultsWithValidDates | ForEach-Object {
+            $formattedDate = $_.ExpirationDate -replace '-', '/'
+            $_.ExpirationDate = $formattedDate
+            $_
+        } | Sort-Object { [datetime]::ParseExact($_.ExpirationDate, "dd/MM/yyyy", $null) } | ForEach-Object {
+            if ([datetime]::ParseExact($_.ExpirationDate, "dd/MM/yyyy", $null) -lt (Get-Date)) {
+                $_.ExpirationDate = "[91m$($_.ExpirationDate)[0m"
+            }
+            $_
+        }
+
+        $sortedResultsWithValidDates + $resultsWithInvalidDates | Format-Table -Property SiteName, Binding-Information, Binding-Name, CertificateStore, CertificateName, ExpirationDate -AutoSize -Wrap
+        break
+    }
+    default {
+        Write-Host "Ongeldige keuze. Het script wordt afgesloten."
+        break
+    }
+}
